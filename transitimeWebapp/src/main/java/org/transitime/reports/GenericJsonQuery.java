@@ -16,6 +16,7 @@
  */
 package org.transitime.reports;
 
+import java.math.BigDecimal;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.util.ArrayList;
@@ -23,6 +24,12 @@ import java.util.List;
 
 import org.transitime.db.GenericQuery;
 
+/**
+ * For web server. Allows a query on an agency db to be easily run.
+ * 
+ * @author Michael Smith
+ *
+ */
 public class GenericJsonQuery extends GenericQuery {
 
 	private StringBuilder strBuilder = new StringBuilder();
@@ -51,6 +58,10 @@ public class GenericJsonQuery extends GenericQuery {
 	}
 	
 	private void addRowElement(int i, long value) {
+		strBuilder.append(value);
+	}
+	
+	private void addRowElement(int i, boolean value) {
 		strBuilder.append(value);
 	}
 	
@@ -89,7 +100,7 @@ public class GenericJsonQuery extends GenericQuery {
 			strBuilder.append("\"").append(columnNames.get(i)).append("\":");
 			
 			// Output value of attribute
-			if (o instanceof Double || o instanceof Float) {
+			if (o instanceof BigDecimal || o instanceof Double || o instanceof Float) {
 				addRowElement(i, ((Number) o).doubleValue());
 			} else if (o instanceof Number) {
 				addRowElement(i, ((Number) o).longValue());
@@ -97,6 +108,8 @@ public class GenericJsonQuery extends GenericQuery {
 				addRowElement(i, (String) o);
 			} else if (o instanceof Timestamp) {
 				addRowElement(i, ((Timestamp) o));
+			} else if (o instanceof Boolean) {
+				addRowElement(i, ((Boolean) o));
 			}
 		}
 		

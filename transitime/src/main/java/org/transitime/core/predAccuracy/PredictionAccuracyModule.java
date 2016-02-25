@@ -192,24 +192,24 @@ public class PredictionAccuracyModule extends Module {
 		
 		// Run forever
 		while (true) {
+			IntervalTimer timer = new IntervalTimer();
+			
 			try {
-				IntervalTimer timer = new IntervalTimer();
-								
 				// Process data
 				getAndProcessData(getRoutesAndStops(), new Date());
 				
 				// Make sure old predictions that were never matched to an
 				// arrival/departure don't stick around taking up memory.
 				clearStalePredictions();
-				
+			} catch (Exception e) {
+				logger.error("Error accessing predictions feed", e); 
+			} finally {				
 				// Wait appropriate amount of time till poll again
 				long elapsedMsec = timer.elapsedMsec();
 				long sleepTime = 
 						getTimeBetweenPollingPredictionsMsec() - elapsedMsec;
 				if (sleepTime > 0)
 					Time.sleep(sleepTime);
-			} catch (Exception e) {
-				logger.error("Error accessing predictions feed", e);
 			}
 		}
 	}
@@ -331,10 +331,13 @@ public class PredictionAccuracyModule extends Module {
 					// a bad prediction was made
 					storePredictionAccuracyInfo(pred, null);
 				} else {
-					++numPredictionsInMemory;					
+					++numPredictionsInMemory;		
+					logger.debug("Prediction currently held in memory. {}"+pred.toString());
 				}
 			}
 		}
+		
+		
 		
 		logger.debug("There are now {} predictions in memory after removing {}.",
 				numPredictionsInMemory, numPredictionsRemoved);
@@ -370,7 +373,7 @@ public class PredictionAccuracyModule extends Module {
 				for (String stopId : stopIds) {
 					List<IpcPredictionsForRouteStopDest> predictions = 
 							PredictionDataCache.getInstance().getPredictions(
-									routeId, stopId, directionId);
+									routeId, directionId, stopId);
 					boolean predictionsFound = false;
 					for (IpcPredictionsForRouteStopDest predList : predictions) {
 						for (IpcPrediction pred : predList
@@ -416,8 +419,12 @@ public class PredictionAccuracyModule extends Module {
 		PredictionKey key = new PredictionKey(arrivalDeparture.getVehicleId(), 
 				arrivalDeparture.getDirectionId(), arrivalDeparture.getStopId());
 		List<PredAccuracyPrediction> predsList = predictionMap.get(key);
+		
 		if (predsList == null || predsList.isEmpty())
-			return;
+		{
+			logger.debug("No matching predictions for {}", arrivalDeparture);
+			return;			
+		}
 		
 		// Go through list of predictions for vehicle, direction, stop and handle
 		// the ones that match fully including being appropriate arrival or
@@ -437,7 +444,9 @@ public class PredictionAccuracyModule extends Module {
 			// shouldn't be counted against vehicle accuracy since likely 
 			// another vehicle substituted in for the original assignment. This 
 			// is especially true for MBTA Commuter Rail
-			if (!pred.getTripId().equals(arrivalDeparture.getTripId()))
+			String tripIdOrShortName = pred.getTripId();
+			if (!tripIdOrShortName.equals(arrivalDeparture.getTripId()) 
+					&& !tripIdOrShortName.equals(arrivalDeparture.getTripShortName()))
 				continue;
 			
 			// Make sure predicted time isn't too far away from the 

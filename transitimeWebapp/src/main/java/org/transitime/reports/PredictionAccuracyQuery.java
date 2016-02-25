@@ -183,10 +183,8 @@ abstract public class PredictionAccuracyQuery {
 	 * 
 	 * @param beginDateStr
 	 *            Begin date for date range of data to use.
-	 * @param endDateStr
-	 *            End date for date range of data to use. Since want to include
-	 *            data for the end date, 1 day is added to the end date for the
-	 *            query.
+	 * @param numDaysStr
+	 *            How many days to do the query for
 	 * @param beginTimeStr
 	 *            For specifying time of day between the begin and end date to
 	 *            use data for. Can thereby specify a date range of a week but
@@ -210,17 +208,16 @@ abstract public class PredictionAccuracyQuery {
 	 * @throws SQLException
 	 * @throws ParseException
 	 */
-	protected void doQuery(String beginDateStr, String endDateStr,
+	protected void doQuery(String beginDateStr, String numDaysStr,
 			String beginTimeStr, String endTimeStr, String routeIds[],
 			String predSource, String predType) throws SQLException,
 			ParseException {
 		// Make sure not trying to get data for too long of a time span since
 		// that could bog down the database.
-		long timespan = Time.parseDate(endDateStr).getTime()
-				- Time.parseDate(beginDateStr).getTime() + 1 * Time.MS_PER_DAY;
-		if (timespan > 31 * Time.MS_PER_DAY) {
+		int numDays = Integer.parseInt(numDaysStr);
+		if (numDays > 31) {
 			throw new ParseException(
-					"Begin date to end date spans more than a month", 0);
+					"Number of days of " + numDays + " spans more than a month", 0);
 		}
 
 		// Determine the time of day portion of the SQL
@@ -230,18 +227,36 @@ abstract public class PredictionAccuracyQuery {
 			// If only begin or only end time set then use default value
 			if (beginTimeStr == null || beginTimeStr.isEmpty())
 				beginTimeStr = "00:00:00";
+			else {
+				// beginTimeStr set so make sure it is valid, and prevent 
+				// possible SQL injection
+				if (!beginTimeStr.matches("\\d+:\\d+"))
+					throw new ParseException("begin time \"" + beginTimeStr 
+							+ "\" is not valid.", 0);
+			}
 			if (endTimeStr == null || endTimeStr.isEmpty())
 				endTimeStr = "23:59:59";
-			
-			timeSql = " AND arrivalDepartureTime::time BETWEEN ? AND ? ";
+			else {
+				// endTimeStr set so make sure it is valid, and prevent 
+				// possible SQL injection
+				if (!endTimeStr.matches("\\d+:\\d+"))
+					throw new ParseException("end time \"" + endTimeStr 
+							+ "\" is not valid.", 0);
+			}
+			timeSql = " AND arrivalDepartureTime::time BETWEEN '" + beginTimeStr 
+					+ "' AND '" + endTimeStr + "' ";
 		}
 
 		// Determine route portion of SQL
+		// Need to examine each route ID twice since doing a
+		// routeId='stableId' OR routeShortName='stableId' in
+		// order to handle agencies where GTFS route_id is not
+		// stable but the GTFS route_short_name is.
 		String routeSql = "";
-		if (routeIds != null && routeIds.length > 0 && !routeIds[0].isEmpty()) {
-			routeSql = " AND (routeId=?";
+		if (routeIds != null && routeIds.length > 0 && !routeIds[0].trim().isEmpty()) {
+			routeSql = " AND (routeId=? OR routeShortName=?";
 			for (int i = 1; i < routeIds.length; ++i)
-				routeSql += " OR routeId=?";
+				routeSql += " OR routeId=? OR routeShortName=?";
 			routeSql += ")";
 		}
 
@@ -277,16 +292,13 @@ abstract public class PredictionAccuracyQuery {
 				+ "     predictionAccuracyMsecs/1000 as predAccuracy, "
 				+ "     predictionSource as source "
 				+ " FROM predictionAccuracy "
-				+ "WHERE arrivalDepartureTime BETWEEN ? AND ? "
+				+ "WHERE arrivalDepartureTime BETWEEN ? "
+				+ "      AND TIMESTAMP '" + beginDateStr + "' + INTERVAL '" + numDays + " day' "
 				+ timeSql
 				+ "  AND predictedTime-predictionReadTime < '00:15:00' "
-				// Filter out MBTA_seconds source since it is isn't
-				// significantly different from MBTA_epoch.
-				// TODO should clean this up by not having MBTA_seconds source
-				// at all
-				// in the prediction accuracy module for MBTA.
-				+ "  AND predictionSource <> 'MBTA_seconds' " + routeSql
-				+ sourceSql + predTypeSql;
+				+ routeSql
+				+ sourceSql 
+				+ predTypeSql;
 
 		PreparedStatement statement = null;
 		try {
@@ -294,50 +306,23 @@ abstract public class PredictionAccuracyQuery {
 
 			// Determine the date parameters for the query
 			Timestamp beginDate = null;
-			Timestamp endDate = null;
 			java.util.Date date = Time.parseDate(beginDateStr);
 			beginDate = new Timestamp(date.getTime());
-
-			date = Time.parseDate(endDateStr);
-			endDate = new Timestamp(date.getTime() + Time.MS_PER_DAY);
-
-			// Determine the time parameters for the query
-			// If begin time not set but end time is then use midnight as begin
-			// time
-			if ((beginTimeStr == null || beginTimeStr.isEmpty())
-					&& endTimeStr != null && !endTimeStr.isEmpty()) {
-				beginTimeStr = "00:00:00";
-			}
-			// If end time not set but begin time is then use midnight as end
-			// time
-			if ((endTimeStr == null || endTimeStr.isEmpty())
-					&& beginTimeStr != null && !beginTimeStr.isEmpty()) {
-				endTimeStr = "23:59:59";
-			}
-
-			java.sql.Time beginTime = null;
-			java.sql.Time endTime = null;
-			if (beginTimeStr != null && !beginTimeStr.isEmpty()) {
-				beginTime = new java.sql.Time(Time.parseTimeOfDay(beginTimeStr)
-						* Time.MS_PER_SEC);
-			}
-			if (endTimeStr != null && !endTimeStr.isEmpty()) {
-				endTime = new java.sql.Time(Time.parseTimeOfDay(endTimeStr)
-						* Time.MS_PER_SEC);
-			}
 
 			// Set the parameters for the query
 			int i = 1;
 			statement.setTimestamp(i++, beginDate);
-			statement.setTimestamp(i++, endDate);
-			if (beginTime != null)
-				statement.setTime(i++, beginTime);
-			if (endTime != null)
-				statement.setTime(i++, endTime);
+			
 			if (routeIds != null) {
 				for (String routeId : routeIds)
-					if (!routeId.isEmpty())
+					if (!routeId.trim().isEmpty()) {
+						// Need to add the route ID twice since doing a
+						// routeId='stableId' OR routeShortName='stableId' in
+						// order to handle agencies where GTFS route_id is not
+						// stable but the GTFS route_short_name is.
 						statement.setString(i++, routeId);
+						statement.setString(i++, routeId);
+					}
 			}
 
 			// Actually execute the query

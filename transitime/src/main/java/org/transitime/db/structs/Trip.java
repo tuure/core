@@ -18,8 +18,6 @@ package org.transitime.db.structs;
 
 import java.io.Serializable;
 import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -150,8 +148,9 @@ public class Trip implements Lifecycle, Serializable {
 	@Column(length=HibernateUtils.DEFAULT_ID_SIZE)
 	private String serviceId;
 	
-	// The GTFS trips.txt trip_headsign if set. Otherwise null.
-	@Column
+	// The GTFS trips.txt trip_headsign if set. Otherwise will get from the
+	// stop_headsign, if set, from the first stop of the trip. Otherwise null.
+	@Column(length=TripPattern.HEADSIGN_LENGTH)
 	private String headsign;
 	
 	// From GTFS trips.txt block_id if set. Otherwise the trip_id.
@@ -194,11 +193,15 @@ public class Trip implements Lifecycle, Serializable {
 	 * @param routeShortName
 	 *            Needed to provide a route identifier that is consistent over
 	 *            schedule changes.
+	 * @param unprocessedHeadsign
+	 *            the headsign from the GTFS trips.txt file, or if that is not
+	 *            available then the stop_headsign from the GTFS stop_times.txt
+	 *            file.
 	 * @param titleFormatter
 	 *            So can fix titles associated with trip
 	 */
 	public Trip(int configRev, GtfsTrip gtfsTrip, String properRouteId,
-			String routeShortName, TitleFormatter titleFormatter) {
+			String routeShortName, String unprocessedHeadsign, TitleFormatter titleFormatter) {
 		this.configRev = configRev;
 		this.tripId = gtfsTrip.getTripId();
 		this.tripShortName = gtfsTrip.getTripShortName();
@@ -208,9 +211,14 @@ public class Trip implements Lifecycle, Serializable {
 		this.routeShortName = routeShortName;
 		this.serviceId = gtfsTrip.getServiceId();
 		this.headsign =
-				processedHeadsign(gtfsTrip.getTripHeadsign(), routeId,
+				processedHeadsign(unprocessedHeadsign, routeId,
 						titleFormatter);
-		
+		// Make sure headsign not too long for db
+		if (this.headsign.length() > TripPattern.HEADSIGN_LENGTH) {
+			this.headsign = 
+					this.headsign.substring(0, TripPattern.HEADSIGN_LENGTH);
+		}
+
 		// block column is optional in GTFS trips.txt file. Best can do when
 		// block ID is not set is to use the trip short name or the trip id 
 		// as the block. MBTA uses trip short name in the feed so start with
@@ -504,16 +512,17 @@ public class Trip implements Lifecycle, Serializable {
 	}
 
 	/**
-	 * Returns specified Trip object for the specified configRev and
-	 * tripShortName.
+	 * Returns list of Trip objects for the specified configRev and
+	 * tripShortName. There can be multiple trips for a tripShortName since can
+	 * have multiple service IDs configured. Therefore a list must be returned.
 	 * 
 	 * @param session
 	 * @param configRev
 	 * @param tripShortName
-	 * @return The Trip or null if no such trip
+	 * @return list of trips for specified configRev and tripShortName
 	 * @throws HibernateException
 	 */
-	public static Trip getTripByShortName(Session session, int configRev,
+	public static List<Trip> getTripByShortName(Session session, int configRev,
 			String tripShortName) throws HibernateException {
 		// Setup the query
 		String hql = "FROM Trip " +
@@ -527,33 +536,7 @@ public class Trip implements Lifecycle, Serializable {
 		@SuppressWarnings("unchecked")
 		List<Trip> trips = query.list();
 		
-		// If no results return null
-		if (trips.size() == 0)
-			return null;
-
-		// If only a single trip matched then assume that the service ID is 
-		// correct so return it. This should usually be fine, and it means
-		// then don't need to determine current service IDs, which is
-		// somewhat expensive.
-		if (trips.size() == 1) 
-			return trips.get(0);
-		
-		// There are results so use the Trip that corresponds to the current 
-		// service ID.
-		Date now = Core.getInstance().getSystemDate();
-		Collection<String> currentServiceIds = 
-				Core.getInstance().getServiceUtils().getServiceIds(now);
-		for (Trip trip : trips) {
-			for (String serviceId : currentServiceIds) {
-				if (trip.getServiceId().equals(serviceId)) {
-					// Found a service ID match so return this trip 
-					return trip;
-				}
-			}
-		}
-		
-		// Didn't find a trip that matched a current service ID so return null
-		return null;
+		return trips;
 	}
 	
 	/**
@@ -864,7 +847,8 @@ public class Trip implements Lifecycle, Serializable {
 	
 	/**
 	 * Returns the routeShortName. If it is null then returns the full route
-	 * name.
+	 * name. Causes exception if Core not available, such as when processing
+	 * GTFS data.
 	 * 
 	 * @return the routeShortName
 	 */
@@ -882,10 +866,14 @@ public class Trip implements Lifecycle, Serializable {
 	 */
 	public Route getRoute() {
 		if (route == null) {
-			DbConfig dbConfig = Core.getInstance().getDbConfig();
-			if (dbConfig == null)
+			if (Core.isCoreApplication()) {
+				DbConfig dbConfig = Core.getInstance().getDbConfig();				
+				if (dbConfig == null)
+					return null;
+				route = dbConfig.getRouteById(routeId);
+			} else {
 				return null;
-			route = dbConfig.getRouteById(routeId);
+			}
 		}
 		return route;
 	}
@@ -893,7 +881,9 @@ public class Trip implements Lifecycle, Serializable {
 	/**
 	 * Returns route name. Gets it from the Core database configuration. If Core
 	 * database configuration not available such as when processing GTFS data
-	 * then will return null.
+	 * then will return null. Will cause exception if core not available
+	 * and gtfs data not loaded in db yet since the active revisions will
+	 * not be set properly yet.
 	 * 
 	 * @return The route name or null if Core object not available
 	 */
@@ -940,6 +930,18 @@ public class Trip implements Lifecycle, Serializable {
 	 */
 	public String getHeadsign() {
 		return headsign;
+	}
+	
+	/**
+	 * For modifying the headsign. Useful for when reading in GTFS data and
+	 * determine that the headsign should be modified because it is for a
+	 * different last stop or such.
+	 * 
+	 * @param headsign
+	 */
+	public void setHeadsign(String headsign) {
+		this.headsign =	headsign.length() <= TripPattern.HEADSIGN_LENGTH ? 
+				headsign : headsign.substring(0, TripPattern.HEADSIGN_LENGTH);
 	}
 
 	/**
@@ -1050,6 +1052,16 @@ public class Trip implements Lifecycle, Serializable {
 		return getTripPattern().getLength();
 	}
 	
+	/**
+	 * Returns the stop ID of the last stop of the trip. This is the destination
+	 * for the trip.
+	 * 
+	 * @return ID of last stop
+	 */
+	public String getLastStopId() {
+		return getTripPattern().getLastStopIdForTrip();
+	}
+
 	/**
 	 * Returns the List of the stop paths for the trip pattern
 	 * 

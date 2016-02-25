@@ -72,7 +72,6 @@ public class GtfsFileProcessor {
 	private final int defaultWaitTimeAtStopMsec;
 	private final double maxSpeedKph;
 	private final double maxTravelTimeSegmentLength;
-	private final boolean shouldCombineShortAndLongNamesForRoutes;
 	private final int configRev;
 	private final boolean shouldStoreNewRevs;
 	private final String notes;
@@ -108,7 +107,6 @@ public class GtfsFileProcessor {
 	 * @param maxDistanceForEliminatingVertices
 	 * @param defaultWaitTimeAtStopMsec
 	 * @param maxTravelTimeSegmentLength
-	 * @param shouldCombineShortAndLongNamesForRoutes
 	 * @param configRev
 	 *            If not -1 then will use this config rev instead of
 	 *            incrementing from the current config rev from the db
@@ -124,7 +122,7 @@ public class GtfsFileProcessor {
 			double maxDistanceForEliminatingVertices,
 			int defaultWaitTimeAtStopMsec, double maxSpeedKph,
 			double maxTravelTimeSegmentLength,
-			boolean shouldCombineShortAndLongNamesForRoutes, int configRev,
+			int configRev,
 			boolean shouldStoreNewRevs, boolean trimPathBeforeFirstStopOfTrip) {
 		// Read in config params if command line option specified
 		if (configFile != null) {
@@ -151,8 +149,6 @@ public class GtfsFileProcessor {
 		this.defaultWaitTimeAtStopMsec = defaultWaitTimeAtStopMsec;
 		this.maxSpeedKph = maxSpeedKph;
 		this.maxTravelTimeSegmentLength = maxTravelTimeSegmentLength;
-		this.shouldCombineShortAndLongNamesForRoutes =
-				shouldCombineShortAndLongNamesForRoutes;
 		this.configRev = configRev;
 		this.notes = notes;
 		this.shouldStoreNewRevs = shouldStoreNewRevs;
@@ -195,11 +191,11 @@ public class GtfsFileProcessor {
 		}
 
 		// First need access to the zip file.
-		// If URL set then should the file from web and store it
+		// If URL set then should get the file from web and store it
 		if (gtfsUrl != null) {
 			gtfsZipFileName =
-					HttpGetGtfsFile
-							.getFile(AgencyConfig.getAgencyId(), gtfsUrl);
+					HttpGetGtfsFile.getFile(AgencyConfig.getAgencyId(),
+							gtfsUrl, unzipSubdirectory);
 		}
 
 		// Uncompress the GTFS zip file if need to
@@ -290,7 +286,6 @@ public class GtfsFileProcessor {
 				new GtfsData(configRev, notes, zipFileLastModifiedTime,
 						shouldStoreNewRevs, AgencyConfig.getAgencyId(),
 						gtfsDirectoryName, supplementDir,
-						shouldCombineShortAndLongNamesForRoutes,
 						pathOffsetDistance, maxStopToPathDistance,
 						maxDistanceForEliminatingVertices,
 						defaultWaitTimeAtStopMsec, maxSpeedKph,
@@ -407,7 +402,7 @@ public class GtfsFileProcessor {
 						commandLineArgs);
 		double maxDistanceForEliminatingVertices =
 				getDoubleCommandLineOption("maxDistanceForEliminatingVertices",
-						0.0, commandLineArgs);
+						3.0, commandLineArgs);
 		int defaultWaitTimeAtStopMsec =
 				getIntegerCommandLineOption("defaultWaitTimeAtStopMsec",
 						10 * Time.MS_PER_SEC, commandLineArgs);
@@ -420,8 +415,6 @@ public class GtfsFileProcessor {
 				getIntegerCommandLineOption("configRev", -1, commandLineArgs);
 
 		// Handle boolean command line options
-		boolean shouldCombineShortAndLongNamesForRoutes =
-				commandLineArgs.hasOption("combineRouteNames");
 		boolean shouldStoreNewRevs = commandLineArgs.hasOption("storeNewRevs");
 		boolean trimPathBeforeFirstStopOfTrip =
 				commandLineArgs.hasOption("trimPathBeforeFirstStopOfTrip");
@@ -435,7 +428,7 @@ public class GtfsFileProcessor {
 						maxDistanceForEliminatingVertices,
 						defaultWaitTimeAtStopMsec, maxSpeedKph,
 						maxTravelTimeSegmentLength,
-						shouldCombineShortAndLongNamesForRoutes, configRev,
+						configRev,
 						shouldStoreNewRevs, trimPathBeforeFirstStopOfTrip);
 
 		return processor;
@@ -595,9 +588,6 @@ public class GtfsFileProcessor {
 								+ "stops.")
 				.create("maxTravelTimeSegmentLength"));
 
-		options.addOption("combineRouteNames", false,
-				"Combines short and long route names to create full name.");
-
 		options.addOption("storeNewRevs", false,
 				"Stores the config and travel time revs into ActiveRevisions "
 						+ "in database.");
@@ -650,7 +640,7 @@ public class GtfsFileProcessor {
 		// Process the data
 		try {
 			processor.process();
-		} catch (IllegalArgumentException e) {
+		} catch (Exception e) {
 			logger.error(e.getMessage());
 		}
 

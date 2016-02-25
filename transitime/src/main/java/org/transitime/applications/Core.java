@@ -112,12 +112,13 @@ public class Core {
 			// Read in config rev from ActiveRevisions table in db
 			ActiveRevisions activeRevisions = ActiveRevisions.get(agencyId);
 			
-			// If config rev not set properly then can't do anything so exit
+			// If config rev not set properly then simply log error.
+			// Originally would also exit() but found that want system to 
+			// work even without GTFS configuration so that can test AVL feed.
 			if (!activeRevisions.isValid()) {
 				logger.error("ActiveRevisions in database is not valid. The "
 						+ "configuration revs must be set to proper values. {}", 
 						activeRevisions);
-				System.exit(-1);
 			}
 			configRev = activeRevisions.getConfigRev();
 		}
@@ -215,6 +216,17 @@ public class Core {
 	}
 	
 	/**
+	 * Returns true if core application. If GTFS processing or other application
+	 * then not a Core application and should't try to read in data such as
+	 * route names for a trip.
+	 * 
+	 * @return true if core application
+	 */
+	public static boolean isCoreApplication() {
+		return Core.singleton != null;
+	}
+	
+	/**
 	 * Makes the config data available to all
 	 * @return
 	 */
@@ -241,8 +253,10 @@ public class Core {
 	}
 	
 	/**
-	 * For when need system time but might be in playback mode. If in playback
-	 * mode then will be using a SettableSystemTime.
+	 * For when need system time but might be in playback mode. If not in
+	 * playback mode then the time will be the time of the system clock. But if
+	 * in playback mode then will be using a SettableSystemTime and the time
+	 * will be that of the last AVL report.
 	 * 
 	 * @return The system epoch time
 	 */
@@ -251,11 +265,13 @@ public class Core {
 	}
 	
 	/**
-	 * For when need system time but might be in playback mode. If in playback
-	 * mode then will be using a SettableSystemTime.
+	 * For when need system time but might be in playback mode. If not in
+	 * playback mode then the time will be the time of the system clock. But if
+	 * in playback mode then will be using a SettableSystemTime and the time
+	 * will be that of the last AVL report.
 	 * 
 	 * @return The system epoch time
-	 */	
+	 */
 	public Date getSystemDate() {
 		return new Date(getSystemTime());
 	}

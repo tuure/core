@@ -7,7 +7,7 @@
   <!-- So that get proper sized map on iOS mobile device -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   
-  <link rel="stylesheet" href="<%= request.getContextPath() %>/map/css/mapUi.css" />
+  <link rel="stylesheet" href="<%= request.getContextPath() %>/maps/css/mapUi.css" />
  
   <!-- Load javascript and css files -->
   <%@include file="/template/includes.jsp" %>
@@ -15,8 +15,7 @@
   <link rel="stylesheet" href="http://cdn.leafletjs.com/leaflet-0.7.3/leaflet.css" />
   <script src="http://cdn.leafletjs.com/leaflet-0.7.3/leaflet.js"></script>
         
-  <script src="<%= request.getContextPath() %>/map/javascript/leafletRotatedMarker.js"></script>
-  <script src="<%= request.getContextPath() %>/map/javascript/mapUiOptions.js"></script>
+  <script src="<%= request.getContextPath() %>/maps/javascript/mapUiOptions.js"></script>
   
   <!--  Override the body style from the includes.jsp/general.css files -->
   <style>
@@ -37,11 +36,13 @@
     
     .popupTable {
     	border-spacing: 0px;
+    	line-height: 1.2;
     }
     	
     .popupTableLabel {
     	font-weight: bold;
     	text-align: right;
+    	padding-right: 4px;
     }
     
   </style>
@@ -50,7 +51,7 @@
   /* For drawing the route and stops */
   var routeOptions = {
 			color: '#00ee00',
-			weight: 4,
+			weight: 5,
 			opacity: 0.4,
 			lineJoin: 'round',
 			clickable: false
@@ -85,11 +86,26 @@
   	var speed = Math.round(parseFloat(avl.speed) * 10)/10;
 	var content = "<table class='popupTable'>" 
 		+ "<tr><td class='popupTableLabel'>Vehicle:</td><td>" + avl.vehicleid + "</td></tr>" 
-		+ "<tr><td class='popupTableLabel'>GPS Time:</td><td>" + avl.time + "</td></tr>" 
-  		+ "<tr><td class='popupTableLabel'>Time Proc:</td><td>" + avl.timeprocessed + "</td></tr>"
+		+ "<tr><td class='popupTableLabel'>GPS&nbsp;Time:</td><td>" + avl.time + "</td></tr>" 
+  		+ "<tr><td class='popupTableLabel'>Route:</td><td>" + avl.routeshortname + "</td></tr>"
+  		+ "<tr><td class='popupTableLabel'>Block:</td><td>" + avl.blockid + "</td></tr>"
+  		+ "<tr><td class='popupTableLabel'>Trip:</td><td>" + avl.tripid + "</td></tr>";
+  		
+  		// Only output both trip ID and trip short name if they are different from each other
+  		if (avl.tripid != avl.tripshortname) {
+  			content += 
+  				"<tr><td class='popupTableLabel'>Trip&nbsp;Name:</td><td>" + avl.tripshortname + "</td></tr>";
+  		}
+  		
+  		content +=
+  		  "<tr><td class='popupTableLabel'>Schedule&nbsp;Adh:</td><td>" + avl.schedadh + "</td></tr>"
  		+ "<tr><td class='popupTableLabel'>Lat/Lon:</td><td>" + avl.lat + ", " + avl.lon + "</td></tr>"
   		+ "<tr><td class='popupTableLabel'>Speed:</td><td>" + speed + " kph</td></tr>"
-  		+ "<tr><td class='popupTableLabel'>Heading:</td><td>" + avl.heading + "</td></tr>"
+  		+ "<tr><td class='popupTableLabel'>Heading:</td><td>" + avl.heading + " degrees</td></tr>"
+  		+ "<tr><td class='popupTableLabel'>Delayed:</td><td>" + avl.isdelayed + "</td></tr>"
+  		+ "<tr><td class='popupTableLabel'>Layover:</td><td>" + avl.islayover + "</td></tr>"
+  		+ "<tr><td class='popupTableLabel'>Wait&nbsp;Stop:</td><td>" + avl.iswaitstop + "</td></tr>"
+  		+ "<tr><td class='popupTableLabel'>Time&nbsp;Proc:</td><td>" + avl.timeprocessed + "</td></tr>"
   		+ "</table>";
 	  		
   	  L.popup(avlPopupOptions)
@@ -177,7 +193,10 @@
   /**
    * Reads in route data obtained via AJAX and draws route and stops on map.
    */
-  function routeConfigCallback(route, status) {
+  function routeConfigCallback(routesData, status) {
+	// Only displaying a single route  
+	var route = routesData.routes[0];
+	  
 	// Draw the paths for the route
 	for (var i=0; i<route.shape.length; ++i) {
 		var shape = route.shape[i];
@@ -219,7 +238,7 @@
 <script>
 var map = L.map('map');
 L.control.scale({metric: false}).addTo(map);
-L.tileLayer('http://api.tiles.mapbox.com/v4/transitime.j1g5bb0j/{z}/{x}/{y}.png?access_token=pk.eyJ1IjoidHJhbnNpdGltZSIsImEiOiJiYnNWMnBvIn0.5qdbXMUT1-d90cv1PAIWOQ', {
+L.tileLayer('http://api.tiles.mapbox.com/v4/transitime.34a63309/{z}/{x}/{y}.png?access_token=pk.eyJ1IjoidHJhbnNpdGltZSIsImEiOiJiYnNWMnBvIn0.5qdbXMUT1-d90cv1PAIWOQ', {
     attribution: '&copy; <a href="http://openstreetmap.org">OpenStreetMap</a> &amp; <a href="http://creativecommons.org/licenses/by-sa/2.0/">CC-BY-SA</a>, Imagery © <a href="http://mapbox.com">Mapbox</a>',
     maxZoom: 19
 }).addTo(map);
@@ -249,9 +268,9 @@ $.ajax({
 });
 
 // If route specified then display it
-var route = "<%= request.getParameter("r") %>";
+var route = "<%= request.getParameter("r") %>".trim();
 if (route != "") {
-	var url = apiUrlPrefix + "/command/route?r=" + route;
+	var url = apiUrlPrefix + "/command/routesDetails?r=" + route;
 	$.getJSON(url, routeConfigCallback);		
 
 }
